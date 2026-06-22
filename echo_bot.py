@@ -1,11 +1,32 @@
 import os
 
 from dotenv import load_dotenv
-from telegram.ext import Filters, MessageHandler, Updater
+from telegram import ReplyKeyboardMarkup
+from telegram.ext import CommandHandler, Filters, MessageHandler, Updater
+
+
+QUIZ_KEYBOARD = [
+    ["Новый вопрос", "Сдаться"],
+    ["Мой счёт"],
+]
+
+
+def get_keyboard():
+    return ReplyKeyboardMarkup(QUIZ_KEYBOARD, resize_keyboard=True)
+
+
+def start(update, context):
+    update.message.reply_text(
+        "Привет! Я бот для викторины.",
+        reply_markup=get_keyboard(),
+    )
 
 
 def echo(update, context):
-    update.message.reply_text(update.message.text)
+    update.message.reply_text(
+        update.message.text,
+        reply_markup=get_keyboard(),
+    )
 
 
 def run_bot():
@@ -18,7 +39,8 @@ def run_bot():
     updater = Updater(telegram_token)
     dispatcher = updater.dispatcher
 
-    dispatcher.add_handler(MessageHandler(Filters.text, echo))
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
 
     updater.start_polling()
     updater.idle()
