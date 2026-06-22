@@ -1,6 +1,7 @@
 import os
 from random import choice
 
+import redis
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import CommandHandler, Filters, MessageHandler, Updater
@@ -13,6 +14,17 @@ QUIZ_KEYBOARD = [
     ["Мой счёт"],
 ]
 NEW_QUESTION_BUTTON = "Новый вопрос"
+
+
+def get_database_connection():
+    redis_password = os.environ.get("REDIS_PASSWORD") or None
+
+    return redis.Redis(
+        host=os.environ.get("REDIS_HOST", "localhost"),
+        port=int(os.environ.get("REDIS_PORT", 6379)),
+        password=redis_password,
+        decode_responses=True,
+    )
 
 
 def get_keyboard():
@@ -28,6 +40,9 @@ def start(update, context):
 
 def send_new_question(update, context):
     question = choice(context.bot_data["question_texts"])
+    chat_id = update.message.chat_id
+    context.bot_data["redis_database"].set(f"telegram:{chat_id}:question", question)
+
     update.message.reply_text(
         question,
         reply_markup=get_keyboard(),
@@ -56,8 +71,12 @@ def run_bot():
     if not quiz_questions:
         raise RuntimeError("Questions were not found")
 
+    redis_database = get_database_connection()
+    redis_database.ping()
+
     updater = Updater(telegram_token)
     dispatcher = updater.dispatcher
+    dispatcher.bot_data["redis_database"] = redis_database
     dispatcher.bot_data["quiz_questions"] = quiz_questions
     dispatcher.bot_data["question_texts"] = list(quiz_questions.keys())
 
