@@ -66,6 +66,7 @@ def handle_new_question_request(update, context):
 
 
 def get_short_answer(answer):
+    answer = answer.strip(" .\"'«»")
     short_answer = re.split(r"[.(]", answer, maxsplit=1)[0]
     return short_answer.strip()
 
@@ -120,8 +121,9 @@ def handle_surrender(update, context):
         return BotState.ANSWERING
 
     correct_answer = context.bot_data["quiz_questions"][question]
+    short_answer = get_short_answer(correct_answer)
     update.message.reply_text(
-        f"Правильный ответ: {correct_answer}",
+        f"Правильный ответ: {short_answer}",
         reply_markup=get_keyboard(),
     )
     return handle_new_question_request(update, context)

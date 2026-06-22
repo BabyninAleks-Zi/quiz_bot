@@ -19,6 +19,11 @@ def remove_title(block):
     return parts[1].strip()
 
 
+def clean_question(question):
+    question = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", question)
+    return question.strip()
+
+
 def parse_quiz_file(file_path):
     quiz_questions = {}
 
@@ -36,7 +41,7 @@ def parse_quiz_file(file_path):
         if not answer_block.startswith("Ответ:"):
             continue
 
-        question = remove_title(block)
+        question = clean_question(remove_title(block))
         answer = remove_title(answer_block)
 
         if question and answer:
