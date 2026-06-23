@@ -54,7 +54,7 @@ def load_quiz_questions(questions_dir=QUESTIONS_DIR):
     quiz_questions = {}
 
     if not questions_dir.exists():
-        raise FileNotFoundError(f"Questions directory not found: {questions_dir}")
+        raise FileNotFoundError(f"Папка с вопросами не найдена: {questions_dir}")
 
     for file_path in questions_dir.glob("*.txt"):
         file_questions = parse_quiz_file(file_path)
@@ -67,4 +67,4 @@ if __name__ == "__main__":
     questions = load_quiz_questions()
 
     if not questions:
-        raise RuntimeError("Questions were not found")
+        raise RuntimeError("Вопросы не найдены")

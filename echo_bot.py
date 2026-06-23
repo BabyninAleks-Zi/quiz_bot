@@ -3,42 +3,36 @@ import re
 from enum import IntEnum
 from random import choice
 
-import redis
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import CommandHandler, ConversationHandler, Filters, MessageHandler, Updater
 
 from quiz_parser import load_quiz_questions
+from utils.database import connect_to_database
+from utils.quiz import (
+    CORRECT_ANSWER_MESSAGE,
+    NEW_QUESTION_BUTTON,
+    NO_CURRENT_QUESTION_MESSAGE,
+    SCORE_BUTTON,
+    SURRENDER_BUTTON,
+    WRONG_ANSWER_MESSAGE,
+    get_current_question,
+    get_short_answer,
+    is_correct_answer,
+    save_current_question,
+)
 
 
 QUIZ_KEYBOARD = [
-    ["Новый вопрос", "Сдаться"],
-    ["Мой счёт"],
+    [NEW_QUESTION_BUTTON, SURRENDER_BUTTON],
+    [SCORE_BUTTON],
 ]
-NEW_QUESTION_BUTTON = "Новый вопрос"
 NEW_QUESTION_PATTERN = f"^{re.escape(NEW_QUESTION_BUTTON)}$"
-SURRENDER_BUTTON = "Сдаться"
 SURRENDER_PATTERN = f"^{re.escape(SURRENDER_BUTTON)}$"
-CORRECT_ANSWER_MESSAGE = (
-    "Правильно! Поздравляю! Для следующего вопроса нажми «Новый вопрос»"
-)
-WRONG_ANSWER_MESSAGE = "Неправильно… Попробуешь ещё раз?"
-NO_CURRENT_QUESTION_MESSAGE = "Нажми «Новый вопрос», чтобы начать викторину."
 
 
 class BotState(IntEnum):
     ANSWERING = 1
-
-
-def get_database_connection():
-    redis_password = os.environ.get("REDIS_PASSWORD") or None
-
-    return redis.Redis(
-        host=os.environ.get("REDIS_HOST", "localhost"),
-        port=int(os.environ.get("REDIS_PORT", 6379)),
-        password=redis_password,
-        decode_responses=True,
-    )
 
 
 def get_keyboard():
@@ -56,7 +50,12 @@ def start(update, context):
 def handle_new_question_request(update, context):
     question = choice(context.bot_data["question_texts"])
     chat_id = update.message.chat_id
-    context.bot_data["redis_database"].set(f"telegram:{chat_id}:question", question)
+    save_current_question(
+        context.bot_data["redis_database"],
+        "telegram",
+        chat_id,
+        question,
+    )
 
     update.message.reply_text(
         question,
@@ -65,26 +64,13 @@ def handle_new_question_request(update, context):
     return BotState.ANSWERING
 
 
-def get_short_answer(answer):
-    answer = answer.strip(" .\"'«»")
-    short_answer = re.split(r"[.(]", answer, maxsplit=1)[0]
-    return short_answer.strip()
-
-
-def normalize_answer(answer):
-    answer = " ".join(answer.split())
-    answer = answer.strip(" .,!?:;\"'«»")
-    return answer.lower().replace("ё", "е")
-
-
-def is_correct_answer(user_answer, correct_answer):
-    short_answer = get_short_answer(correct_answer)
-    return normalize_answer(user_answer) == normalize_answer(short_answer)
-
-
 def handle_solution_attempt(update, context):
     chat_id = update.message.chat_id
-    question = context.bot_data["redis_database"].get(f"telegram:{chat_id}:question")
+    question = get_current_question(
+        context.bot_data["redis_database"],
+        "telegram",
+        chat_id,
+    )
 
     if not question:
         update.message.reply_text(
@@ -111,7 +97,11 @@ def handle_solution_attempt(update, context):
 
 def handle_surrender(update, context):
     chat_id = update.message.chat_id
-    question = context.bot_data["redis_database"].get(f"telegram:{chat_id}:question")
+    question = get_current_question(
+        context.bot_data["redis_database"],
+        "telegram",
+        chat_id,
+    )
 
     if not question:
         update.message.reply_text(
@@ -134,14 +124,13 @@ def run_bot():
 
     telegram_token = os.environ.get("TG_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
     if not telegram_token:
-        raise RuntimeError("Set TG_TOKEN in .env")
+        raise RuntimeError("Добавьте TG_TOKEN в .env")
 
     quiz_questions = load_quiz_questions()
     if not quiz_questions:
-        raise RuntimeError("Questions were not found")
+        raise RuntimeError("Вопросы не найдены")
 
-    redis_database = get_database_connection()
-    redis_database.ping()
+    redis_database = connect_to_database()
 
     updater = Updater(telegram_token)
     dispatcher = updater.dispatcher
