@@ -2,6 +2,11 @@
 
 Quiz Bot задаёт вопросы викторины в Telegram и ВКонтакте, проверяет ответы пользователей и хранит текущий вопрос пользователя в Redis.
 
+## Демо
+
+- Telegram: [@Incredible_space_bot](https://t.me/Incredible_space_bot)
+- ВКонтакте: [vk.com/club235528518](https://vk.com/club235528518)
+
 ## Возможности
 
 - Telegram-бот с кнопками.
