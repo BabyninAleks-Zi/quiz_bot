@@ -5,6 +5,7 @@ from random import choice
 
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup
+from telegram.error import NetworkError
 from telegram.ext import CommandHandler, ConversationHandler, Filters, MessageHandler, Updater
 
 from quiz_parser import load_quiz_questions
@@ -174,8 +175,11 @@ def run_bot():
     )
     dispatcher.add_handler(conversation_handler)
 
-    updater.start_polling()
-    updater.idle()
+    try:
+        updater.start_polling()
+        updater.idle()
+    except NetworkError:
+        raise SystemExit("Не удалось подключиться к Telegram API") from None
 
 
 if __name__ == "__main__":
