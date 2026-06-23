@@ -4,6 +4,8 @@ import re
 NEW_QUESTION_BUTTON = "Новый вопрос"
 SURRENDER_BUTTON = "Сдаться"
 SCORE_BUTTON = "Мой счёт"
+TG_PLATFORM = "tg"
+VK_PLATFORM = "vk"
 
 CORRECT_ANSWER_MESSAGE = (
     "Правильно! Поздравляю! Для следующего вопроса нажми «Новый вопрос»"
@@ -12,12 +14,12 @@ WRONG_ANSWER_MESSAGE = "Неправильно… Попробуешь ещё р
 NO_CURRENT_QUESTION_MESSAGE = "Нажми «Новый вопрос», чтобы начать викторину."
 
 
-def save_current_question(redis_database, platform, user_id, question):
-    redis_database.set(f"{platform}:{user_id}:question", question)
+def save_current_question(redis_database, platform, chat_id, question):
+    redis_database.set(f"{platform}-{chat_id}-question", question)
 
 
-def get_current_question(redis_database, platform, user_id):
-    return redis_database.get(f"{platform}:{user_id}:question")
+def get_current_question(redis_database, platform, chat_id):
+    return redis_database.get(f"{platform}-{chat_id}-question")
 
 
 def get_short_answer(answer):

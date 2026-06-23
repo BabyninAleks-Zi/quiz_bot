@@ -16,6 +16,7 @@ from utils.quiz import (
     NO_CURRENT_QUESTION_MESSAGE,
     SCORE_BUTTON,
     SURRENDER_BUTTON,
+    TG_PLATFORM,
     WRONG_ANSWER_MESSAGE,
     get_current_question,
     get_short_answer,
@@ -53,7 +54,7 @@ def handle_new_question_request(update, context):
     chat_id = update.message.chat_id
     save_current_question(
         context.bot_data["redis_database"],
-        "telegram",
+        TG_PLATFORM,
         chat_id,
         question,
     )
@@ -69,7 +70,7 @@ def handle_solution_attempt(update, context):
     chat_id = update.message.chat_id
     question = get_current_question(
         context.bot_data["redis_database"],
-        "telegram",
+        TG_PLATFORM,
         chat_id,
     )
 
@@ -100,7 +101,7 @@ def handle_surrender(update, context):
     chat_id = update.message.chat_id
     question = get_current_question(
         context.bot_data["redis_database"],
-        "telegram",
+        TG_PLATFORM,
         chat_id,
     )
 
@@ -123,15 +124,26 @@ def handle_surrender(update, context):
 def run_bot():
     load_dotenv()
 
-    telegram_token = os.environ.get("TG_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
+    telegram_token = os.environ.get("TG_TOKEN")
     if not telegram_token:
         raise RuntimeError("Добавьте TG_TOKEN в .env")
+
+    try:
+        redis_port = int(os.environ.get("REDIS_PORT", 6379))
+        redis_db = int(os.environ.get("REDIS_DB", 0))
+    except ValueError:
+        raise RuntimeError("REDIS_PORT и REDIS_DB в .env должны быть числами")
 
     quiz_questions = load_quiz_questions()
     if not quiz_questions:
         raise RuntimeError("Вопросы не найдены")
 
-    redis_database = connect_to_database()
+    redis_database = connect_to_database(
+        host=os.environ.get("REDIS_HOST", "localhost"),
+        port=redis_port,
+        password=os.environ.get("REDIS_PASSWORD") or None,
+        db=redis_db,
+    )
 
     updater = Updater(telegram_token)
     dispatcher = updater.dispatcher

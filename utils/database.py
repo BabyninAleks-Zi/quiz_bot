@@ -1,20 +1,17 @@
-import os
-
 import redis
 
 
-def get_database_connection():
-    redis_password = os.environ.get("REDIS_PASSWORD") or None
-
+def get_database_connection(host, port, password=None, db=0):
     return redis.Redis(
-        host=os.environ.get("REDIS_HOST", "localhost"),
-        port=int(os.environ.get("REDIS_PORT", 6379)),
-        password=redis_password,
+        host=host,
+        port=port,
+        password=password,
+        db=db,
         decode_responses=True,
     )
 
 
-def connect_to_database():
-    redis_database = get_database_connection()
+def connect_to_database(host, port, password=None, db=0):
+    redis_database = get_database_connection(host, port, password, db)
     redis_database.ping()
     return redis_database

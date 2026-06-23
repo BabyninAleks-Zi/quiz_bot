@@ -15,6 +15,7 @@ from utils.quiz import (
     NO_CURRENT_QUESTION_MESSAGE,
     SCORE_BUTTON,
     SURRENDER_BUTTON,
+    VK_PLATFORM,
     WRONG_ANSWER_MESSAGE,
     get_current_question,
     get_short_answer,
@@ -41,14 +42,14 @@ def send_message(vk, peer_id, text):
     )
 
 
-def handle_new_question_request(vk, peer_id, user_id, redis_database, question_texts):
+def handle_new_question_request(vk, peer_id, redis_database, question_texts):
     question = choice(question_texts)
-    save_current_question(redis_database, "vk", user_id, question)
+    save_current_question(redis_database, VK_PLATFORM, peer_id, question)
     send_message(vk, peer_id, question)
 
 
-def handle_solution_attempt(vk, peer_id, user_id, user_answer, redis_database, quiz_questions):
-    question = get_current_question(redis_database, "vk", user_id)
+def handle_solution_attempt(vk, peer_id, user_answer, redis_database, quiz_questions):
+    question = get_current_question(redis_database, VK_PLATFORM, peer_id)
 
     if not question:
         send_message(vk, peer_id, NO_CURRENT_QUESTION_MESSAGE)
@@ -63,8 +64,8 @@ def handle_solution_attempt(vk, peer_id, user_id, user_answer, redis_database, q
     send_message(vk, peer_id, WRONG_ANSWER_MESSAGE)
 
 
-def handle_surrender(vk, peer_id, user_id, redis_database, quiz_questions, question_texts):
-    question = get_current_question(redis_database, "vk", user_id)
+def handle_surrender(vk, peer_id, redis_database, quiz_questions, question_texts):
+    question = get_current_question(redis_database, VK_PLATFORM, peer_id)
 
     if not question:
         send_message(vk, peer_id, NO_CURRENT_QUESTION_MESSAGE)
@@ -73,23 +74,22 @@ def handle_surrender(vk, peer_id, user_id, redis_database, quiz_questions, quest
     correct_answer = quiz_questions[question]
     short_answer = get_short_answer(correct_answer)
     send_message(vk, peer_id, f"Правильный ответ: {short_answer}")
-    handle_new_question_request(vk, peer_id, user_id, redis_database, question_texts)
+    handle_new_question_request(vk, peer_id, redis_database, question_texts)
 
 
 def handle_message(vk, message, redis_database, quiz_questions, question_texts):
     peer_id = message["peer_id"]
-    user_id = message["from_id"]
     user_text = message["text"]
 
     if user_text == NEW_QUESTION_BUTTON:
-        handle_new_question_request(vk, peer_id, user_id, redis_database, question_texts)
+        handle_new_question_request(vk, peer_id, redis_database, question_texts)
         return
 
     if user_text == SURRENDER_BUTTON:
-        handle_surrender(vk, peer_id, user_id, redis_database, quiz_questions, question_texts)
+        handle_surrender(vk, peer_id, redis_database, quiz_questions, question_texts)
         return
 
-    handle_solution_attempt(vk, peer_id, user_id, user_text, redis_database, quiz_questions)
+    handle_solution_attempt(vk, peer_id, user_text, redis_database, quiz_questions)
 
 
 def run_bot():
@@ -107,11 +107,22 @@ def run_bot():
     except ValueError:
         raise RuntimeError("VK_GROUP_ID в .env должен быть числом")
 
+    try:
+        redis_port = int(os.environ.get("REDIS_PORT", 6379))
+        redis_db = int(os.environ.get("REDIS_DB", 0))
+    except ValueError:
+        raise RuntimeError("REDIS_PORT и REDIS_DB в .env должны быть числами")
+
     quiz_questions = load_quiz_questions()
     if not quiz_questions:
         raise RuntimeError("Вопросы не найдены")
 
-    redis_database = connect_to_database()
+    redis_database = connect_to_database(
+        host=os.environ.get("REDIS_HOST", "localhost"),
+        port=redis_port,
+        password=os.environ.get("REDIS_PASSWORD") or None,
+        db=redis_db,
+    )
 
     vk_session = vk_api.VkApi(token=token)
     vk = vk_session.get_api()
