@@ -1,7 +1,6 @@
 import os
 import re
 from enum import IntEnum
-from random import choice
 
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup
@@ -14,14 +13,25 @@ from utils.quiz import (
     CORRECT_ANSWER_MESSAGE,
     NEW_QUESTION_BUTTON,
     NO_CURRENT_QUESTION_MESSAGE,
+    REPORT_BUTTON,
     SCORE_BUTTON,
     SURRENDER_BUTTON,
     TG_PLATFORM,
     WRONG_ANSWER_MESSAGE,
-    get_current_question,
+    add_answer_attempt,
+    clear_current_question,
+    format_score_message,
+    get_current_question_id,
+    get_quiz_question,
+    get_random_question_id,
     get_short_answer,
+    get_user_score,
+    has_quiz_questions,
     is_correct_answer,
+    report_last_surrendered_question,
     save_current_question,
+    save_quiz_questions,
+    save_surrendered_question,
 )
 
 
@@ -31,14 +41,20 @@ QUIZ_KEYBOARD = [
 ]
 NEW_QUESTION_PATTERN = f"^{re.escape(NEW_QUESTION_BUTTON)}$"
 SURRENDER_PATTERN = f"^{re.escape(SURRENDER_BUTTON)}$"
+SCORE_PATTERN = f"^{re.escape(SCORE_BUTTON)}$"
+REPORT_PATTERN = f"^{re.escape(REPORT_BUTTON)}$"
 
 
 class BotState(IntEnum):
     ANSWERING = 1
 
 
-def get_keyboard():
-    return ReplyKeyboardMarkup(QUIZ_KEYBOARD, resize_keyboard=True)
+def get_keyboard(show_report_button=False):
+    keyboard = QUIZ_KEYBOARD.copy()
+    if show_report_button:
+        keyboard = [*keyboard, [REPORT_BUTTON]]
+
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 def start(update, context):
@@ -49,31 +65,46 @@ def start(update, context):
     return BotState.ANSWERING
 
 
-def handle_new_question_request(update, context):
-    question = choice(context.bot_data["question_texts"])
+def handle_new_question_request(update, context, show_report_button=False):
+    question_id = get_random_question_id(context.bot_data["redis_database"])
+    if not question_id:
+        raise RuntimeError("Вопросы не найдены")
+
+    question = get_quiz_question(context.bot_data["redis_database"], question_id)
+    if not question:
+        raise RuntimeError("Вопрос не найден в Redis")
+
     chat_id = update.message.chat_id
     save_current_question(
         context.bot_data["redis_database"],
         TG_PLATFORM,
         chat_id,
-        question,
+        question_id,
     )
 
     update.message.reply_text(
-        question,
-        reply_markup=get_keyboard(),
+        question["question"],
+        reply_markup=get_keyboard(show_report_button),
     )
     return BotState.ANSWERING
 
 
 def handle_solution_attempt(update, context):
     chat_id = update.message.chat_id
-    question = get_current_question(
+    question_id = get_current_question_id(
         context.bot_data["redis_database"],
         TG_PLATFORM,
         chat_id,
     )
 
+    if not question_id:
+        update.message.reply_text(
+            NO_CURRENT_QUESTION_MESSAGE,
+            reply_markup=get_keyboard(),
+        )
+        return BotState.ANSWERING
+
+    question = get_quiz_question(context.bot_data["redis_database"], question_id)
     if not question:
         update.message.reply_text(
             NO_CURRENT_QUESTION_MESSAGE,
@@ -81,15 +112,28 @@ def handle_solution_attempt(update, context):
         )
         return BotState.ANSWERING
 
-    correct_answer = context.bot_data["quiz_questions"][question]
+    correct_answer = question["answer"]
 
     if is_correct_answer(update.message.text, correct_answer):
+        add_answer_attempt(
+            context.bot_data["redis_database"],
+            TG_PLATFORM,
+            chat_id,
+            is_correct=True,
+        )
+        clear_current_question(context.bot_data["redis_database"], TG_PLATFORM, chat_id)
         update.message.reply_text(
             CORRECT_ANSWER_MESSAGE,
             reply_markup=get_keyboard(),
         )
         return BotState.ANSWERING
 
+    add_answer_attempt(
+        context.bot_data["redis_database"],
+        TG_PLATFORM,
+        chat_id,
+        is_correct=False,
+    )
     update.message.reply_text(
         WRONG_ANSWER_MESSAGE,
         reply_markup=get_keyboard(),
@@ -99,12 +143,20 @@ def handle_solution_attempt(update, context):
 
 def handle_surrender(update, context):
     chat_id = update.message.chat_id
-    question = get_current_question(
+    question_id = get_current_question_id(
         context.bot_data["redis_database"],
         TG_PLATFORM,
         chat_id,
     )
 
+    if not question_id:
+        update.message.reply_text(
+            NO_CURRENT_QUESTION_MESSAGE,
+            reply_markup=get_keyboard(),
+        )
+        return BotState.ANSWERING
+
+    question = get_quiz_question(context.bot_data["redis_database"], question_id)
     if not question:
         update.message.reply_text(
             NO_CURRENT_QUESTION_MESSAGE,
@@ -112,13 +164,51 @@ def handle_surrender(update, context):
         )
         return BotState.ANSWERING
 
-    correct_answer = context.bot_data["quiz_questions"][question]
+    correct_answer = question["answer"]
     short_answer = get_short_answer(correct_answer)
+    save_surrendered_question(
+        context.bot_data["redis_database"],
+        TG_PLATFORM,
+        chat_id,
+        question_id,
+    )
     update.message.reply_text(
         f"Правильный ответ: {short_answer}",
+        reply_markup=get_keyboard(show_report_button=True),
+    )
+    return handle_new_question_request(update, context, show_report_button=True)
+
+
+def handle_score_request(update, context):
+    chat_id = update.message.chat_id
+    score = get_user_score(context.bot_data["redis_database"], TG_PLATFORM, chat_id)
+    update.message.reply_text(
+        format_score_message(score),
         reply_markup=get_keyboard(),
     )
-    return handle_new_question_request(update, context)
+    return BotState.ANSWERING
+
+
+def handle_question_report(update, context):
+    chat_id = update.message.chat_id
+    question_id = report_last_surrendered_question(
+        context.bot_data["redis_database"],
+        TG_PLATFORM,
+        chat_id,
+    )
+
+    if not question_id:
+        update.message.reply_text(
+            "Сначала нажмите «Сдаться», чтобы выбрать вопрос для жалобы.",
+            reply_markup=get_keyboard(),
+        )
+        return BotState.ANSWERING
+
+    update.message.reply_text(
+        "Спасибо! Я запомнил, что этот вопрос нужно проверить.",
+        reply_markup=get_keyboard(),
+    )
+    return BotState.ANSWERING
 
 
 def run_bot():
@@ -134,10 +224,6 @@ def run_bot():
     except ValueError:
         raise RuntimeError("REDIS_PORT и REDIS_DB в .env должны быть числами")
 
-    quiz_questions = load_quiz_questions()
-    if not quiz_questions:
-        raise RuntimeError("Вопросы не найдены")
-
     redis_database = connect_to_database(
         host=os.environ.get("REDIS_HOST", "localhost"),
         port=redis_port,
@@ -145,11 +231,16 @@ def run_bot():
         db=redis_db,
     )
 
+    if not has_quiz_questions(redis_database):
+        quiz_questions = load_quiz_questions()
+        if not quiz_questions:
+            raise RuntimeError("Вопросы не найдены")
+
+        save_quiz_questions(redis_database, quiz_questions)
+
     updater = Updater(telegram_token)
     dispatcher = updater.dispatcher
     dispatcher.bot_data["redis_database"] = redis_database
-    dispatcher.bot_data["quiz_questions"] = quiz_questions
-    dispatcher.bot_data["question_texts"] = list(quiz_questions.keys())
 
     conversation_handler = ConversationHandler(
         entry_points=[
@@ -161,6 +252,14 @@ def run_bot():
             MessageHandler(
                 Filters.regex(SURRENDER_PATTERN),
                 handle_surrender,
+            ),
+            MessageHandler(
+                Filters.regex(SCORE_PATTERN),
+                handle_score_request,
+            ),
+            MessageHandler(
+                Filters.regex(REPORT_PATTERN),
+                handle_question_report,
             ),
             MessageHandler(
                 Filters.text & ~Filters.command,
@@ -176,6 +275,14 @@ def run_bot():
                 MessageHandler(
                     Filters.regex(SURRENDER_PATTERN),
                     handle_surrender,
+                ),
+                MessageHandler(
+                    Filters.regex(SCORE_PATTERN),
+                    handle_score_request,
+                ),
+                MessageHandler(
+                    Filters.regex(REPORT_PATTERN),
+                    handle_question_report,
                 ),
                 MessageHandler(
                     Filters.text & ~Filters.command,
